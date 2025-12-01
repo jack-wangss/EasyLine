@@ -1,7 +1,7 @@
-// Simple 2D line renderer (pixel coordinates)
 #pragma once
 
 #include <vector>
+#include "Camera.h"
 
 namespace EasyLine {
 
@@ -15,7 +15,7 @@ public:
     static void OnResize(int fbWidth, int fbHeight);
 
     // Call once per-frame (optional)
-    static void BeginFrame();
+    static void BeginFrame(const Camera& camera);
     // Draw a single line from (x0,y0) to (x1,y1) in pixel coords. Thickness in pixels.
     static void DrawLine(float x0, float y0, float x1, float y1, float thickness, Color color);
     // Flush current batched lines to GPU

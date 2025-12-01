@@ -6,20 +6,20 @@
 #include <cmath>
 #include <fstream>
 #include <sstream>
+#include "glm/glm.hpp"
 
 namespace EasyLine {
 
 struct Vertex {
     float x, y;      // position (NDC)
-    float nx, ny;    // normal (unit) used to offset for thickness
     float r, g, b, a; // color
-    float thickness; // thickness in pixels (stored per-vertex)
 };
 
 static std::vector<Vertex> g_vertices;
 static unsigned int g_vao = 0, g_vbo = 0, g_program = 0;
 static int g_fbWidth = 1, g_fbHeight = 1;
 static std::mutex g_mutex;
+static glm::mat4 g_ViewProjectionMatrix;
 
 // Shaders are loaded from Resource/Shader at runtime. See ReadFile() below.
 
@@ -53,59 +53,46 @@ bool Renderer::Init(int fbWidth, int fbHeight) {
 
     EL_CORE_INFO("Initializing renderer ({} x {})", fbWidth, fbHeight);
 
-    // Load shaders from several candidate locations so running from build/exec paths works.
-    std::vector<std::string> candidates = {
-        "Resource/Shader/line.vert.glsl",
-        "Resource/Shader/line.frag.glsl"
-    };
+    // Load shader files (expected under Resource/Shader next to the exe)
+    const std::string vertPath = "Resource/Shader/line.vert.glsl";
+    const std::string fragPath = "Resource/Shader/line.frag.glsl";
 
-    auto try_load = [&](const std::string &vert, const std::string &frag)->bool {
-        std::string vsrc = ReadFile(vert);
-        if (vsrc.empty()) return false;
-        std::string fsrc = ReadFile(frag);
-        if (fsrc.empty()) return false;
-        unsigned int vs = CompileShader(GL_VERTEX_SHADER, vsrc.c_str());
-        if (!vs) {
-            EL_CORE_ERROR("Vertex shader compilation failed for '{}'", vert);
-            return false;
-        }
-        unsigned int fs = CompileShader(GL_FRAGMENT_SHADER, fsrc.c_str());
-        if (!fs) { glDeleteShader(vs); EL_CORE_ERROR("Fragment shader compilation failed for '{}'", frag); return false; }
+    std::string vsrc = ReadFile(vertPath);
+    if (vsrc.empty()) { EL_CORE_ERROR("Failed to read vertex shader: {}", vertPath); return false; }
+    std::string fsrc = ReadFile(fragPath);
+    if (fsrc.empty()) { EL_CORE_ERROR("Failed to read fragment shader: {}", fragPath); return false; }
 
-        // attach shaders to program
-        glAttachShader(g_program, vs);
-        glAttachShader(g_program, fs);
-        glLinkProgram(g_program);
-        int linked = 0; glGetProgramiv(g_program, GL_LINK_STATUS, &linked);
-        if (!linked) {
-            char infoLog[1024]; glGetProgramInfoLog(g_program, 1024, NULL, infoLog);
-            EL_CORE_ERROR("Shader program linking failed ({} / {}): {}", vert, frag, infoLog);
-            glDeleteShader(vs); glDeleteShader(fs);
-            return false;
-        }
+    unsigned int vs = CompileShader(GL_VERTEX_SHADER, vsrc.c_str());
+    if (!vs) { EL_CORE_ERROR("Vertex shader compile failed"); return false; }
 
-        // success: we can delete shaders now
+    unsigned int fs = CompileShader(GL_FRAGMENT_SHADER, fsrc.c_str());
+    if (!fs) { EL_CORE_ERROR("Fragment shader compile failed"); glDeleteShader(vs); return false; }
+
+    g_program = glCreateProgram();
+    if (!g_program) { EL_CORE_ERROR("Failed to create shader program"); glDeleteShader(vs); glDeleteShader(fs); return false; }
+
+    glAttachShader(g_program, vs);
+    glAttachShader(g_program, fs);
+    glLinkProgram(g_program);
+
+    int linked = 0;
+    glGetProgramiv(g_program, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char infoLog[1024];
+        glGetProgramInfoLog(g_program, 1024, NULL, infoLog);
+        EL_CORE_ERROR("Shader program linking failed: {}", infoLog);
+        glDeleteProgram(g_program); g_program = 0;
         glDeleteShader(vs); glDeleteShader(fs);
-        EL_CORE_INFO("Loaded shaders from '{}' and '{}'", vert, frag);
-        return true;
-    };
-
-    bool loaded = false;
-    // try pairs of paths (0 with 1, 2 with 3, ...)
-    for (size_t i = 0; i + 1 < candidates.size(); i += 2) {
-        // create program object for each attempt and delete if fails
-        if (g_program) { glDeleteProgram(g_program); g_program = 0; }
-        g_program = glCreateProgram();
-        if (!g_program) { EL_CORE_ERROR("Failed to create shader program object"); return false; }
-        if (try_load(candidates[i], candidates[i+1])) { loaded = true; break; }
-        // on failure, delete program and continue
-        if (g_program) { glDeleteProgram(g_program); g_program = 0; }
-    }
-
-    if (!loaded) {
-        EL_CORE_ERROR("Failed to load/compile/link shaders from any candidate path. Checked {} candidates.", candidates.size());
         return false;
     }
+
+    glUseProgram(g_program);
+    glUniformMatrix4fv(glGetUniformLocation(g_program, "u_ViewProjection"), 1, GL_FALSE, &g_ViewProjectionMatrix[0][0]);
+    glUseProgram(0);
+
+    // shaders are no longer needed after a successful link
+    glDeleteShader(vs);
+    glDeleteShader(fs);
 
     glGenVertexArrays(1, &g_vao);
     glGenBuffers(1, &g_vbo);
@@ -121,18 +108,12 @@ bool Renderer::Init(int fbWidth, int fbHeight) {
     glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
     glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
 
-    // attribute layout: 0: vec2 position, 1: vec2 normal, 2: vec4 color, 3: float thickness
+    // attribute layout: 0: vec2 position, 1: vec4 color
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, x));
 
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, nx));
-
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, r));
-
-    glEnableVertexAttribArray(3);
-    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, thickness));
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, r));
 
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -154,37 +135,26 @@ void Renderer::OnResize(int fbWidth, int fbHeight) {
     g_fbWidth = fbWidth; g_fbHeight = fbHeight;
 }
 
-void Renderer::BeginFrame() {
-    // nothing for now
+void Renderer::BeginFrame(const Camera& camera) {
+    g_ViewProjectionMatrix = camera.GetViewProjectionMatrix();
 }
 
 void Renderer::DrawLine(float x0, float y0, float x1, float y1, float thickness, Color color) {
     std::lock_guard<std::mutex> lock(g_mutex);
 
-    // convert pixel coords to NDC [-1,1]
-    auto toNDC = [](float x, float y, int fbW, int fbH)->std::pair<float,float>{
-        float nx = (x / (float)fbW) * 2.0f - 1.0f;
-        float ny = 1.0f - (y / (float)fbH) * 2.0f;
-        return {nx, ny};
-    };
+    glm::vec2 p0 = {x0, y0};
+    glm::vec2 p1 = {x1, y1};
 
-    auto a = toNDC(x0, y0, g_fbWidth, g_fbHeight);
-    auto b = toNDC(x1, y1, g_fbWidth, g_fbHeight);
+    glm::vec2 dir = glm::normalize(p1 - p0);
+    glm::vec2 normal = {-dir.y, dir.x};
 
-    float dx = b.first - a.first;
-    float dy = b.second - a.second;
-    float len = std::sqrt(dx*dx + dy*dy);
-    if (len < 1e-6f) return;
-    float nx = -dy / len;
-    float ny = dx / len;
+    float halfThickness = thickness / 2.0f;
 
-    // create quad as two triangles (we push 6 vertices)
-    Vertex v0{a.first, a.second,  nx,  ny, color.r, color.g, color.b, color.a, thickness};
-    Vertex v1{b.first, b.second,  nx,  ny, color.r, color.g, color.b, color.a, thickness};
-    Vertex v2{a.first, a.second, -nx, -ny, color.r, color.g, color.b, color.a, thickness};
-    Vertex v3{b.first, b.second, -nx, -ny, color.r, color.g, color.b, color.a, thickness};
+    Vertex v0 = { p0.x + normal.x * halfThickness, p0.y + normal.y * halfThickness, color.r, color.g, color.b, color.a };
+    Vertex v1 = { p1.x + normal.x * halfThickness, p1.y + normal.y * halfThickness, color.r, color.g, color.b, color.a };
+    Vertex v2 = { p0.x - normal.x * halfThickness, p0.y - normal.y * halfThickness, color.r, color.g, color.b, color.a };
+    Vertex v3 = { p1.x - normal.x * halfThickness, p1.y - normal.y * halfThickness, color.r, color.g, color.b, color.a };
 
-    // triangles: v0,v1,v2 and v1,v3,v2
     g_vertices.push_back(v0);
     g_vertices.push_back(v1);
     g_vertices.push_back(v2);
@@ -203,13 +173,12 @@ void Renderer::Flush() {
     }
 
     glUseProgram(g_program);
+    glUniformMatrix4fv(glGetUniformLocation(g_program, "u_ViewProjection"), 1, GL_FALSE, &g_ViewProjectionMatrix[0][0]);
+
     glBindVertexArray(g_vao);
     glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
 
     glBufferData(GL_ARRAY_BUFFER, g_vertices.size() * sizeof(Vertex), g_vertices.data(), GL_DYNAMIC_DRAW);
-
-    GLint viewportLoc = glGetUniformLocation(g_program, "uViewportSize");
-    if (viewportLoc >= 0) glUniform2f(viewportLoc, (float)g_fbWidth, (float)g_fbHeight);
 
     glDrawArrays(GL_TRIANGLES, 0, (GLsizei)g_vertices.size());
 

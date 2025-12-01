@@ -1,8 +1,9 @@
-add_executable(editor main.cpp Log.cpp Renderer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty/glad/src/glad.c)
+add_executable(editor main.cpp Log.cpp Renderer.cpp Camera.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty/glad/src/glad.c)
 
 target_include_directories(editor PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty/glad/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty
 )
 
 message("Source Dir: ${CMAKE_SOURCE_DIR}")
