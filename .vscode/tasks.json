@@ -1,0 +1,43 @@
+{
+        "version": "2.0.0",
+        "tasks": [
+                {
+                        "label": "Configure (VS)",
+                        "type": "shell",
+                        "command": "cmake",
+                        "args": ["-S", "${workspaceFolder}", "-B", "${workspaceFolder}/build", "-G", "Visual Studio 17 2022", "-A", "x64"],
+                        "group": { "kind": "build", "isDefault": false }
+                },
+                {
+                        "label": "Build Editor (Debug)",
+                        "type": "shell",
+                        "command": "cmake",
+                        "args": ["--build", "${workspaceFolder}/build", "--config", "Debug", "--target", "Editor"],
+                        "group": { "kind": "build", "isDefault": true },
+                        "dependsOn": ["Configure (VS)"]
+                },
+                {
+                        "label": "Build Editor (Release)",
+                        "type": "shell",
+                        "command": "cmake",
+                        "args": ["--build", "${workspaceFolder}/build", "--config", "Release", "--target", "Editor"],
+                        "group": "build",
+                        "dependsOn": ["Configure (VS)"]
+                },
+                {
+                        "label": "Clean build dir",
+                        "type": "shell",
+                        "command": "cmd",
+                        "args": ["/c", "rmdir", "/s", "/q", "${workspaceFolder}\\build"],
+                        "group": "build"
+                },
+                {
+                        "label": "Reconfigure (fresh)",
+                        "type": "shell",
+                        "command": "cmake",
+                        "args": ["-S", "${workspaceFolder}", "-B", "${workspaceFolder}/build", "-G", "Visual Studio 17 2022", "-A", "x64"],
+                        "dependsOn": ["Clean build dir"],
+                        "group": "build"
+                }
+        ]
+}

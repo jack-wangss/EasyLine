@@ -1,0 +1,25 @@
+{
+    // VS Code debug configurations for HomePlayStudio
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Editor Debug",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/EasyLine/Debug/example.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "stopAtEntry": false,
+            "symbolSearchPath": "${workspaceFolder}/build/src/Editor/Debug"
+        },
+        {
+            "name": "Editor Release",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/Editor/Release/example.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        }
+    ]
+}
